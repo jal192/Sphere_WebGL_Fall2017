@@ -1,0 +1,495 @@
+<html>
+<head>
+<title>Project 1: Transformation by Jason Ly</title>
+<meta http-equiv="content-type" content="text/html; charset=ISO-8859-1">
+<script type="text/javascript" src="vecmatfunctions.js"></script>
+<script id="vshader" type="x-shader/x-vertex"> 
+	attribute vec4 vPosition;
+	attribute vec4 vColor;
+	varying vec4 color;
+	uniform mat4 ctm;
+	uniform mat4 model_view;
+	uniform mat4 projection;
+	
+	void main() {
+		gl_Position = projection * model_view * ctm * vPosition;
+		color = vColor;
+	}
+</script>
+<script id="fshader" type="x-shader/x-fragment">
+	precision mediump float;
+	varying vec4 color;
+	void main() {
+		gl_FragColor = color;
+	}
+</script>
+
+<script type="text/javascript">
+	function loadShaderProgramScript(gl, id, type) {
+		var shaderScript = document.getElementById(id);
+		if (!shaderScript) {
+			return null;
+		}
+		var shaderString = "";
+		var currentNode = shaderScript.firstChild;
+		while (currentNode) {
+			if (currentNode.nodeType == 3) {
+				shaderString += currentNode.textContent;
+			}
+			currentNode = currentNode.nextSibling;
+		}
+		var aShader = gl.createShader(type)
+		gl.shaderSource(aShader, shaderString);
+		gl.compileShader(aShader);
+		if (!gl.getShaderParameter(aShader, gl.COMPILE_STATUS)) {
+			alert(id + ": " + gl.getShaderInfoLog(aShader));
+			return null;
+		}
+		return aShader;
+	}
+
+	function initShader(gl, vshader, fshader) {
+		var vertexShader = loadShaderProgramScript(gl, vshader, gl.VERTEX_SHADER);
+		var fragmentShader = loadShaderProgramScript(gl, fshader, gl.FRAGMENT_SHADER);
+
+		var shaderProgram;
+		shaderProgram = gl.createProgram();
+		gl.attachShader(shaderProgram, vertexShader);
+		gl.attachShader(shaderProgram, fragmentShader);
+		gl.linkProgram(shaderProgram);
+		if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+			alert("Unable to link shader programs");
+		}
+		return shaderProgram;
+	}
+
+	var ctm_location;
+	var model_view_location;
+	var projection_location;
+	
+	var ctm = m4_identity();
+	var model_view = m4_identity();
+	var projection = m4_identity();
+	
+	function main() {
+		var canvas = document.getElementById("sphere");
+		initGL(canvas);
+		init();
+		drawScene();
+		requestAnimationFrame(idle);
+		
+		canvas.onmousedown = mouseDownCallback;
+		canvas.onmouseup = mouseUpCallback;
+		canvas.onmousewheel = mouseWheelCallback;
+		window.onkeypress = keypressCallback;
+	}
+
+	var gl;
+	
+	var num_vertices = 3894;
+	
+	// Stores the colors and vertices
+	var vertices = [];
+	var colors = [];
+
+	var radian_to_degree = 180.0 / Math.PI;
+	var DegreesToRadians = Math.PI / 180.0;
+
+	// Stores the radius or what half the sides of the screen is
+	var mid_width_x = 256;
+	var mid_height_y = 256;
+
+	// Keeping track of the previous and current mouse coordinates
+	var curr_x;
+	var curr_y;
+	var curr_z;
+	var prev_x;
+	var prev_y;
+	var prev_z;
+
+	// Calculate the amount of rotation about z axis
+	var theta_z;
+
+	// Keep track of the last rotation matrix
+	var last_rotation_matrix;
+
+	// Check if the default points have been modified
+	var first_coordinate = 0;
+
+	var enableIdle = 0;
+	var leftDown = 1;
+	var start_t;
+	var end_t;
+	var diff_t;
+
+	// Check if a last rotation matrix has been stored
+	var last_rot_mat_exists = 0;
+
+	var theta_increment = 10.0;
+	var phi_increment = 10.0;
+
+	function initGL(canvas) {
+		try {
+			gl = canvas.getContext("experimental-webgl");
+			gl.viewportWidth = canvas.width;
+			gl.viewportHeight = canvas.height;
+		}
+		catch (e) {
+		}
+		if (!gl) {
+			alert("Unable to initialise WebGL");
+		}
+	}
+	
+	function init() {
+		var phir;
+		var phir20;
+		var thetar;
+
+		// Generate half of the triangles for the quad
+		for (phi = -80.0; phi <= 80.0; phi += phi_increment) {
+			phir = phi*DegreesToRadians;
+			phir20 = (phi + phi_increment)*DegreesToRadians;
+			for (theta = -180.0; theta < 180.0; theta += theta_increment) {
+				thetar = theta*DegreesToRadians;
+				vertices.push(Math.sin(thetar)*Math.cos(phir));
+				vertices.push(Math.cos(thetar)*Math.cos(phir));
+				vertices.push(-Math.sin(phir));
+				vertices.push(1.0);
+
+				vertices.push(Math.sin(thetar)*Math.cos(phir20));
+				vertices.push(Math.cos(thetar)*Math.cos(phir20));
+				vertices.push(-Math.sin(phir20));
+				vertices.push(1.0);
+
+				thetar = (theta + theta_increment)*DegreesToRadians;
+				vertices.push(Math.sin(thetar)*Math.cos(phir));
+				vertices.push(Math.cos(thetar)*Math.cos(phir));
+				vertices.push(-Math.sin(phir));
+				vertices.push(1.0);
+			}
+		}
+
+		// Generate the other half of the triangles for the quads
+		for (phi = -80.0; phi <= 80.0; phi += phi_increment) {
+			phir = phi*DegreesToRadians;
+			phir20 = (phi + phi_increment)*DegreesToRadians;
+			for (theta = -180.0; theta < 180.0; theta += theta_increment) {
+				thetar = theta*DegreesToRadians;
+				vertices.push(Math.sin(thetar)*Math.cos(phir20));
+				vertices.push(Math.cos(thetar)*Math.cos(phir20));
+				vertices.push(-Math.sin(phir20));
+				vertices.push(1.0);
+				
+				thetar = (theta + theta_increment)*DegreesToRadians;
+				vertices.push(Math.sin(thetar)*Math.cos(phir20));
+				vertices.push(Math.cos(thetar)*Math.cos(phir20));
+				vertices.push(-Math.sin(phir20));
+				vertices.push(1.0);
+				
+				vertices.push(Math.sin(thetar)*Math.cos(phir));
+				vertices.push(Math.cos(thetar)*Math.cos(phir));
+				vertices.push(-Math.sin(phir));
+				vertices.push(1.0);
+			}
+		}
+
+		// Get the top and bottom
+		var sin80 = Math.sin(80.0*DegreesToRadians);
+		var cos80 = Math.cos(80.0*DegreesToRadians);
+
+		for (theta = -180.0; theta <= 180.0; theta += theta_increment)
+		{
+			// Draw the triangle, taking the first point on the outside
+			// of the circle, then the center then the next point
+			var thetar = theta*DegreesToRadians;
+			vertices.push(Math.sin(thetar)*cos80);
+			vertices.push(Math.cos(thetar)*cos80);
+			vertices.push(-sin80);
+			vertices.push(1.0);
+			
+			vertices.push(0.0);
+			vertices.push(0.0);
+			vertices.push(-1.0);
+			vertices.push(1.0);
+			
+			var thetatemp = (theta + theta_increment)*DegreesToRadians;
+			vertices.push(Math.sin(thetatemp)*cos80);
+			vertices.push(Math.cos(thetatemp)*cos80);
+			vertices.push(-sin80);
+			vertices.push(1.0);
+		}
+
+		for (theta = -180.0; theta <= 180.0; theta += theta_increment)
+		{
+			// Draw the triangle, taking the first point on the outside
+			// of the circle, then the center then the next point
+			var temp = theta;
+
+			var thetatemp = (temp + theta_increment)*DegreesToRadians;
+			vertices.push(Math.sin(thetatemp)*cos80);
+			vertices.push(Math.cos(thetatemp)*cos80);
+			vertices.push(sin80);
+			vertices.push(1.0);
+
+			vertices.push(0.0);
+			vertices.push(0.0);
+			vertices.push(1.0);
+			vertices.push(1.0);
+
+			var thetar = temp*DegreesToRadians;
+			vertices.push(Math.sin(thetar)*cos80);
+			vertices.push(Math.cos(thetar)*cos80);
+			vertices.push(sin80);
+			vertices.push(1.0);
+		}
+		
+		console.log(vertices.length);
+
+		// Generate random colors
+		for (i = 0; i < num_vertices; i++) {
+			colors.push(randomFloat());
+			colors.push(randomFloat());
+			colors.push(randomFloat());
+			colors.push(1.0);
+		}
+
+		var shaderProgram = initShader(gl, "vshader", "fshader");
+
+		gl.useProgram(shaderProgram);
+		var vao = gl.createBuffer();
+		gl.bindBuffer(gl.ARRAY_BUFFER, vao);
+		gl.bufferData(gl.ARRAY_BUFFER, 4 * (vertices.length + colors.length), gl.STATIC_DRAW);
+		gl.bufferSubData(gl.ARRAY_BUFFER, 0, new Float32Array(vertices));
+
+		gl.bufferSubData(gl.ARRAY_BUFFER, 4 * vertices.length, new Float32Array(colors));
+		
+		shaderProgram.vertexPositionAttribute = gl.getAttribLocation(shaderProgram, "vPosition");
+		gl.enableVertexAttribArray(shaderProgram.vertexPositionAttribute);
+		gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, 4, gl.FLOAT, false, 0, 0); 		
+
+		shaderProgram.vertexColorAttribute = gl.getAttribLocation(shaderProgram, "vColor");
+		gl.enableVertexAttribArray(shaderProgram.vertexColorAttribute);
+		gl.vertexAttribPointer(shaderProgram.vertexColorAttribute, 4, gl.FLOAT, false, 0, 4 * vertices.length); 	
+		
+		ctm_location = gl.getUniformLocation(shaderProgram, "ctm");
+
+		model_view_location = gl.getUniformLocation(shaderProgram, "model_view");
+		projection_location = gl.getUniformLocation(shaderProgram, "projection");
+
+		gl.clearColor(0.0, 0.0, 0.0, 1.0);
+		gl.enable(gl.DEPTH_TEST);
+	}
+
+	function drawScene() {
+		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+		gl.uniformMatrix4fv(ctm_location, false, ctm);
+		gl.uniformMatrix4fv(model_view_location, false, model_view);
+		gl.uniformMatrix4fv(projection_location, false, projection);
+		gl.drawArrays(gl.TRIANGLES, 0, num_vertices);
+	}
+
+	function idle() {
+		if (enableIdle)
+		{
+			// Continually apply rotation matrix until idle stops
+			ctm = m4_mult(last_rotation_matrix, ctm);
+
+			drawScene();
+			requestAnimationFrame(idle);
+		}
+	}
+	
+	// Keyboard functionality
+	function keypressCallback(event) {
+		// If user presses spacebar, stop animation
+		if (event.keyCode == 32) {
+			enableIdle = 0;
+			first_coordinate = 0;
+			last_rot_mat_exists = 0;
+		}
+	}
+	
+	// Mouse click
+	function mouseDownCallback(event) {
+		var d = new Date();
+		start_t = d.getTime();
+		var canvas = document.getElementById("sphere");
+		canvas.onmousemove = mouseMoveCallback;
+	}
+	
+	// Click released
+	function mouseUpCallback(event) {
+		var d = new Date();
+		end_t = d.getTime();
+		
+		first_coordinate = 0;
+		
+		if ((end_t - start_t) < 500 && last_rot_mat_exists == 1) {
+			enableIdle = 1;
+
+			requestAnimationFrame(idle);
+		}
+		var canvas = document.getElementById("sphere");
+		canvas.onmousemove = null;
+	}
+	
+	// Mouse moving
+	function mouseMoveCallback(event) {
+		// Recenter x,y to center of the screen
+		curr_x = event.clientX - mid_width_x;
+		curr_y = -(event.clientY - mid_height_y);
+		
+		var curr_z = Math.sqrt((mid_width_x*mid_height_y) - (curr_x*curr_x) - (curr_y*curr_y));
+
+		// Check for nan, space where user moves outside of the trackball
+		// Don't calculate a rotation matrix if the user exceeds the trackball
+		// Also don't calculate if the previous and current points are the same - prevents object from disappearing
+		if (curr_z == curr_z && ((prev_x != curr_x) || (prev_y != curr_y))) {
+			// Update values for the first time
+			if (first_coordinate == 0) {
+				prev_x = curr_x;
+				prev_y = curr_y;
+				prev_z = curr_z;
+
+				first_coordinate = 1;
+			}
+			else {
+				// Initialize the vectors representing the previous and current points
+				var curr_point = [curr_x, curr_y, curr_z, 0.0];
+				var prev_point = [prev_x, prev_y, prev_z, 0.0];
+				
+				// Use unit vectors of the current and previous point to make calculating the answer simpler
+				var unit_curr = v4_unit_vec(curr_point);
+				var unit_prev = v4_unit_vec(prev_point);
+				
+				// Obtain the vector that you rotate around
+				var cross_curr_prev = v4_cross_prod(prev_point, curr_point);
+
+				// Calculate the unit vector of the rotation vector
+				var unit_vector = v4_unit_vec(cross_curr_prev);
+
+				// Calculate the length of the normal vector
+				var d = Math.sqrt((unit_vector[1]*unit_vector[1]) + (unit_vector[2]*unit_vector[2]));
+
+				// By default set the rotation matrices about the x axis to identity matrix
+				// If we are not rotating about the x-axis then calculate rx_pos and rx_neg as usual
+				var rx_pos = m4_identity();
+				var rx_neg = m4_identity();
+
+				// If d does not equal 0 then we are not rotating about the x-axis
+				if (d != 0) {
+					rx_pos = rotate_about_x(d, unit_vector[1], unit_vector[2]);	// Rx(+)
+					rx_neg = rotate_about_x(d, -unit_vector[1], unit_vector[2]);  // Rx(-)
+				}
+
+				// Calculate the dot product of the unit vectors of the current and previous points
+				var dot_curr_prev = v4_dot_prod(unit_curr, unit_prev);
+				// Calculate the angle of rotation about z
+				theta_z = radian_to_degree * Math.acos(dot_curr_prev);
+				
+				// These steps follow what is shown in the slides
+				// Get the rotation matrices that rotate the rotation axis along the x, y, z axis
+				var ry_pos = rotate_about_y(d, unit_vector[0]);		// Ry(+)
+				var ry_neg = rotate_about_y(d, -unit_vector[0]);	// Ry(-)
+				var rz = rotate_about_z(theta_z);					// Rz(theta_z)
+
+				// Calculate the rotation matrix
+				var rotation_matrix = m4_mult(ry_neg, rx_pos);		// Ry(-)Rx(+)
+				rotation_matrix = m4_mult(rz, rotation_matrix);		// Rz(theta_z)Ry(-)Rx(+)
+				rotation_matrix = m4_mult(ry_pos, rotation_matrix); // Ry(+)Rz(theta_z)Ry(-)Rx(+)
+				rotation_matrix = m4_mult(rx_neg, rotation_matrix); // Rx(-)Ry(+)Rz(theta_z)Ry(-)Rx(+)
+				
+				// Change rotation matrix from right hand coordinate system to left hand 
+				
+				
+				// Apply rotation matrix to translation matrix
+				ctm = m4_mult(rotation_matrix, ctm);
+
+				drawScene();
+
+				// Set new previous position
+				prev_x = curr_x;
+				prev_y = curr_y;
+				prev_z = curr_z;
+				
+				// Keep track of the last rotation matrix
+				last_rotation_matrix = rotation_matrix;
+				last_rot_mat_exists = 1;
+			}
+		}
+	}
+	
+	// Scroll Wheel Events
+	function mouseWheelCallback(event) {
+		var scaling_factor = 1.02;
+		// Scroll up, zoom in
+		if (event.wheelDelta == 150) {
+			var scaling_matrix = scale(scaling_factor, scaling_factor, scaling_factor);
+			ctm = m4_mult(scaling_matrix, ctm);
+			drawScene();
+		}
+		// Scroll down, zoom out
+		else if (event.wheelDelta == -150) {
+			var scaling_matrix = scale(1/scaling_factor, 1/scaling_factor, 1/scaling_factor);
+			ctm = m4_mult(scaling_matrix, ctm);
+			drawScene();
+		}
+	}
+	
+	function randomFloat() {
+		var min = 0.0;
+		var max = 1.0;
+		var randFloat = Math.random() * (max - min) + min;
+		
+		return randFloat;
+	};
+	
+	// Function used to rotate an object about the x axis
+	function rotate_about_x(d, alpha_y, alpha_z) {
+		var result = [1, 0, 0, 0,
+				  0, alpha_z / d, -alpha_y / d, 0,
+				  0, alpha_y / d, alpha_z / d, 0,
+				  0, 0, 0, 1];
+
+		return result;
+	}
+
+	// Function used to rotate an object about the y axis
+	function rotate_about_y(d, alpha_x) {
+		var result = [d, 0, alpha_x, 0, 
+					  0, 1, 0, 0, 
+					  -alpha_x, 0, d, 0,
+					  0, 0, 0, 1];
+
+		return result;
+	}
+
+	// Function used to rotate an obejct about the z axis
+	function rotate_about_z(theta) {
+		var s = (Math.PI / 180.0)*theta;
+		
+		var result = [Math.cos(s), Math.sin(s), 0, 0,
+					  -Math.sin(s), Math.cos(s), 0, 0,
+					  0, 0, 1, 0,
+					  0, 0, 0, 1];
+
+		return result;
+	}
+
+	// Function used to zoom in and out
+	function scale(sx, sy, sz) {
+		var result = [sx, 0, 0, 0, 
+					  0, sy, 0, 0,
+					  0, 0, sz, 0, 
+					  0, 0, 0, 1];
+		return result;
+	}
+	
+</script>
+</head>
+<body onload="main();">
+<canvas id="sphere" style="border: none;" width="512" height="512"></canvas>
+
+</body>
+</html>
